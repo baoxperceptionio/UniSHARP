@@ -5,7 +5,7 @@ Universal Sharp Monocular View Synthesis
 
 <p align="center">
   <b>Meixi Song</b><sup>1</sup> ·
-  <b>Dizhe Zhang</b><sup>1</sup> ·
+  <b>Dizhe Zhang</b><sup>1,*</sup> ·
   <b>Hao Ren</b><sup>1</sup> ·
   <b>Ruiyang Zhang</b><sup>1</sup> ·
   <b>Bo Du</b><sup>2</sup> ·
