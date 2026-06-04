@@ -37,7 +37,7 @@ UniSHARP extends SHARP-style photorealistic monocular view synthesis to universa
 Clone this repository and enter the project directory:
 
 ```bash
-git clone 
+git clone https://github.com/Insta360-Research-Team/UniSHARP.git
 cd Unisharp
 ```
 
