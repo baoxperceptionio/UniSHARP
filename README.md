@@ -6,13 +6,13 @@ Universal Sharp Monocular View Synthesis
 <p align="center">
   <b>Meixi Song</b><sup>1</sup> ·
   <b>Dizhe Zhang</b><sup>1,*</sup> ·
-  <b>Hao Ren</b><sup>1</sup> ·
-  <b>Ruiyang Zhang</b><sup>1</sup> ·
-  <b>Bo Du</b><sup>2</sup> ·
-  <b>Ming-Hsuan Yang</b><sup>3</sup> ·
-  <b>Lu Qi</b><sup>1,2,*</sup>
+  <b>Hao Ren</b><sup>1,2</sup> ·
+  <b>Ruiyang Zhang</b><sup>1,3</sup> ·
+  <b>Bo Du</b><sup>4</sup> ·
+  <b>Ming-Hsuan Yang</b><sup>5</sup> ·
+  <b>Lu Qi</b><sup>1,4,*</sup>
   <br>
-  <sup>1</sup>Insta360 Research · <sup>2</sup>Wuhan University · <sup>3</sup>University of California, Merced
+  <sup>1</sup>Insta360 Research · <sup>2</sup>Sun Yat-sen University · <sup>3</sup>Beihang University · <sup>4</sup>Wuhan University · <sup>5</sup>University of California, Merced
 </p>
 
 <p align="center">
