@@ -157,7 +157,7 @@ Training starts UniSHARP heads from scratch and loads the original pretrained Un
 Released UniSHARP checkpoints are available at [Insta360-Research/Unisharp](https://huggingface.co/Insta360-Research/Unisharp/tree/main). Place a checkpoint anywhere on disk and pass the path to validation or inference:
 
 ```bash
-CHECKPOINT=/path/to/model.pt
+CHECKPOINT=/path/to/pretained_model.pt
 ```
 
 ## 🚀 Training
