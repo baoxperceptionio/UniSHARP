@@ -1569,7 +1569,7 @@ class UnifiedTrainer:
         erp_w = int(src_erp_u8.shape[-1])
         cube_face_w = int(batch.src_cube_depth_m.shape[2]) if torch.is_tensor(batch.src_cube_depth_m) else max(1, erp_h // 2)
         
-        use_flip_yz = str(dataset_name).lower() not in {"sim"}
+        use_flip_yz = str(dataset_name).lower() not in {"sim", "smx_sim_fisheye"}
         pose_convs_per_sample = ["c2w"] * cur_bs
         flip_yz_per_sample = [bool(use_flip_yz)] * cur_bs
         
