@@ -45,7 +45,7 @@ export MAX_INDEX_GAP="${MAX_INDEX_GAP:-10}"
 export MAX_DEPTH_M="${MAX_DEPTH_M:-100.0}"
 export PINHOLE_TRAIN_SIZE="${PINHOLE_TRAIN_SIZE:-0}"
 export TRAIN_RESIZE_MULTIPLE="${TRAIN_RESIZE_MULTIPLE:-256}"
-export SIM_MAX_LONG_EDGE="${SIM_MAX_LONG_EDGE:-512}"
+export SIM_MAX_LONG_EDGE="${SIM_MAX_LONG_EDGE:-0}"
 export RE10K_PSEUDO_FAR_DEPTH_INVALID_M="${RE10K_PSEUDO_FAR_DEPTH_INVALID_M:-30.0}"
 export SIM_FAR_DEPTH_INVALID_M="${SIM_FAR_DEPTH_INVALID_M:-30.0}"
 export SIM_FAR_DEPTH_INVALID_MAX_FRAC="${SIM_FAR_DEPTH_INVALID_MAX_FRAC:-1.0}"
@@ -80,13 +80,13 @@ export DATASET_WEIGHT_WILDRGBD="${DATASET_WEIGHT_WILDRGBD:-1.0}"
 export DATASET_WEIGHT_DL3DV="${DATASET_WEIGHT_DL3DV:-1.0}"
 export DATASET_WEIGHT_SCANETPP="${DATASET_WEIGHT_SCANETPP:-0.0}"
 
-export DATA_ROOT_RE10K="${DATA_ROOT_RE10K:-/media/team_data/ML4_team/datasets/nopose/re10k}"
-export RE10K_PSEUDO_DEPTH_ROOT="${RE10K_PSEUDO_DEPTH_ROOT:-/media/team_data/ML4_team/datasets/nopose/re10k_unik3d_pseudo_depth}"
+export DATA_ROOT_RE10K="${DATA_ROOT_RE10K:-/media/team_data/ML4_team/datasets/re10k}"
+export RE10K_PSEUDO_DEPTH_ROOT="${RE10K_PSEUDO_DEPTH_ROOT:-/media/team_data/ML4_team/datasets/re10k_depth}"
 export DATA_ROOT_HM3D="${DATA_ROOT_HM3D:-/media/team_data/ML4_team/datasets/panogs}"
-export DATA_ROOT_SIM="${DATA_ROOT_SIM:-/media/team_data/ML4_team/datasets/smx_sim}"
-export SIM_POSE_ROOT="${SIM_POSE_ROOT:-/media/team_data/ML4_team/datasets/smx_sim/30cm}"
-export DATA_ROOT_DL3DV="${DATA_ROOT_DL3DV:-/media/team_data/ML4_team/datasets/sharp/DL3DV-ALL-960P}"
-export DATA_ROOT_DL3DV_DEPTH="${DATA_ROOT_DL3DV_DEPTH:-/media/team_data/ML4_team/datasets/sharp/DL3DV-ALL-960P_da3_outputs}"
+export DATA_ROOT_SIM="${DATA_ROOT_SIM:-/media/team_data/ML4_team/datasets/omnirooms}"
+export SIM_POSE_ROOT="${SIM_POSE_ROOT:-/media/team_data/ML4_team/datasets/omnirooms/pose}"
+export DATA_ROOT_DL3DV="${DATA_ROOT_DL3DV:-/media/team_data/ML4_team/datasets/DL3DV-ALL-960P}"
+export DATA_ROOT_DL3DV_DEPTH="${DATA_ROOT_DL3DV_DEPTH:-/media/team_data/ML4_team/datasets/DL3DV-ALL-960P_depth}"
 export DATA_ROOT_SCANETPP="${DATA_ROOT_SCANETPP:-/media/team_data/ML4_team/datasets/scan}"
 
 DEFAULT_DATASET_MANIFEST_DIR="${REPO_ROOT}/dataset_manifests"
@@ -94,7 +94,7 @@ if [[ -d "${REPO_ROOT}/../dataset_manifests" ]]; then
   DEFAULT_DATASET_MANIFEST_DIR="${REPO_ROOT}/../dataset_manifests"
 fi
 export DATASET_MANIFEST_DIR="${DATASET_MANIFEST_DIR:-${DEFAULT_DATASET_MANIFEST_DIR}}"
-if [[ ! -f "${DATASET_MANIFEST_DIR}/sim_train_scenes.txt" && -f "${REPO_ROOT}/../dataset_manifests/sim_train_scenes.txt" ]]; then
+if [[ ! -f "${DATASET_MANIFEST_DIR}/omnirooms.txt" && -f "${REPO_ROOT}/../dataset_manifests/omnirooms.txt" ]]; then
   export DATASET_MANIFEST_DIR="${REPO_ROOT}/../dataset_manifests"
 fi
 export WILD_ROOTS_FILE="${WILD_ROOTS_FILE:-${DATASET_MANIFEST_DIR}/wildrgbd_roots.txt}"
@@ -113,7 +113,7 @@ fi
 
 echo "UniSharp training: run=${RUN_NAME} out=${OUT_ROOT} gpu=${GPU_IDS}"
 echo "  branch=gt-override scratch_unik3d_pretrained"
-echo "  datasets: re10k=${DATASET_WEIGHT_RE10K} hm3d=${DATASET_WEIGHT_HM3D} sim=${DATASET_WEIGHT_SIM} wildrgbd=${DATASET_WEIGHT_WILDRGBD} dl3dv=${DATASET_WEIGHT_DL3DV} scanetpp=${DATASET_WEIGHT_SCANETPP}"
+echo "  datasets: re10k=${DATASET_WEIGHT_RE10K} hm3d=${DATASET_WEIGHT_HM3D} omnirooms=${DATASET_WEIGHT_SIM} wildrgbd=${DATASET_WEIGHT_WILDRGBD} dl3dv=${DATASET_WEIGHT_DL3DV} scanetpp=${DATASET_WEIGHT_SCANETPP}"
 
 exec "${LAUNCH_CMD[@]}" -m unisharp.cli train-feature \
   --out-root "${OUT_ROOT}" \
