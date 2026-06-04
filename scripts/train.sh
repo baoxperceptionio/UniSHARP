@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 CONDA_SH="${CONDA_SH:-/media/home/smx/miniconda3/bin/conda}"
-CONDA_ENV="${CONDA_ENV:-sharp}"
+CONDA_ENV="${CONDA_ENV:-unisharp}"
 if [[ -x "${CONDA_SH}" ]]; then
   eval "$("${CONDA_SH}" shell.bash hook)"
   conda activate "${CONDA_ENV}"
@@ -15,7 +15,7 @@ export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
 export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION="${PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION:-python}"
 
 export OUT_ROOT="${OUT_ROOT:-${REPO_ROOT}/outputs}"
-export RUN_NAME="${RUN_NAME:-unisharp_gt_override_$(date +%Y%m%d_%H%M%S)}"
+export RUN_NAME="${RUN_NAME:-unisharp_$(date +%Y%m%d_%H%M%S)}"
 
 export SEED="${SEED:-260602}"
 
