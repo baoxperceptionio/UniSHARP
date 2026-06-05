@@ -33,6 +33,30 @@ IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".PNG", ".JPG", ".JPEG", ".W
 CameraKind = Literal["perspective", "fisheye", "panorama"]
 FACE_NAMES = ["up", "back", "left", "front", "right", "down"]
 
+MAX_LONG_EDGE = 0
+PERSPECTIVE_MAX_LONG_EDGE = 768
+PANORAMA_MAX_LONG_EDGE = 1536
+FORWARD_VIEWS = 10
+FORWARD_DISTANCE_M = 0.2
+ROTATE_VIEWS = 10
+ROTATE_RADIUS_M = 0.1
+GIF_DURATION_MS = 300
+VIEW_MOTION_NEAR_SCENE_DEPTH_M = 2.0
+VIEW_MOTION_MIN_SCALE = 0.08
+VIEW_MOTION_FORWARD_DEPTH_FRAC = 0.04
+VIEW_MOTION_ROTATE_DEPTH_FRAC = 0.02
+VIEW_MOTION_FAR_SCENE_MEDIAN_M = 2.5
+VIEW_MOTION_FOREGROUND_DEPTH_QUANTILE = 0.20
+
+FISHEYE_FOV_THRESHOLD_DEG = 120.0
+FISHEYE_DIAG_THRESHOLD_DEG = 150.0
+FISHEYE_VFOV_MIN_DEG = 80.0
+FISHEYE_MAX_ASPECT = 1.65
+PANORAMA_HFOV_THRESHOLD_DEG = 300.0
+PANORAMA_VFOV_THRESHOLD_DEG = 120.0
+PANORAMA_ASPECT_MIN = 1.9
+PANORAMA_ASPECT_MAX = 2.1
+
 
 def _configure_torchhub_cache() -> None:
     torchhub_dir = REPO_ROOT / "checkpoints" / "torchhub"
@@ -95,6 +119,52 @@ def _collect_image_paths(args: argparse.Namespace) -> list[Path]:
     if not paths:
         raise ValueError("Provide --image, --image-list, or --image-dir.")
     return paths[: int(args.max_images)] if int(args.max_images) > 0 else paths
+
+
+def _perspective_max_long_edge() -> int:
+    return int(PERSPECTIVE_MAX_LONG_EDGE)
+
+
+def _panorama_max_long_edge() -> int:
+    return int(PANORAMA_MAX_LONG_EDGE)
+
+
+def _image_hw_from_path(image_path: Path) -> tuple[int, int]:
+    with Image.open(image_path) as raw:
+        image = ImageOps.exif_transpose(raw)
+        w, h = image.size
+    return int(h), int(w)
+
+
+def _should_load_panorama_native(
+    *,
+    image_path: Path,
+    args: argparse.Namespace,
+    camera_json_entry: dict[str, Any] | None,
+) -> bool:
+    forced = str(args.camera).strip().lower()
+    if forced in {"panorama", "erp"}:
+        return True
+    if forced in {"perspective", "pinhole", "fisheye"}:
+        return False
+    json_camera_name = _camera_name_from_json(camera_json_entry)
+    if json_camera_name in {"panorama", "erp", "spherical"}:
+        return True
+    if json_camera_name in {"perspective", "pinhole", "fisheye", "fisheye624", "opencv_fisheye"}:
+        return False
+    image_h, image_w = _image_hw_from_path(image_path)
+    return _camera_name_from_aspect(image_h=image_h, image_w=image_w) == "panorama"
+
+
+def _initial_max_long_edge(
+    *,
+    image_path: Path,
+    args: argparse.Namespace,
+    camera_json_entry: dict[str, Any] | None,
+) -> int:
+    if _should_load_panorama_native(image_path=image_path, args=args, camera_json_entry=camera_json_entry):
+        return _panorama_max_long_edge()
+    return _perspective_max_long_edge()
 
 
 def _load_rgb_u8(image_path: Path, max_long_edge: int) -> torch.Tensor:
@@ -206,15 +276,15 @@ def _classify_camera(stats: dict[str, float], args: argparse.Namespace) -> Camer
     v_fov = float(stats["vertical_fov_deg"])
     diag_fov = float(stats["diagonal_fov_deg"])
     if (
-        float(args.panorama_aspect_min) <= aspect <= float(args.panorama_aspect_max)
-        and h_fov >= float(args.panorama_hfov_threshold_deg)
-        and v_fov >= float(args.panorama_vfov_threshold_deg)
+        PANORAMA_ASPECT_MIN <= aspect <= PANORAMA_ASPECT_MAX
+        and h_fov >= PANORAMA_HFOV_THRESHOLD_DEG
+        and v_fov >= PANORAMA_VFOV_THRESHOLD_DEG
     ):
         return "panorama"
-    fishlike_aspect = aspect <= float(args.fisheye_max_aspect)
+    fishlike_aspect = aspect <= FISHEYE_MAX_ASPECT
     fishlike_fov = (
-        max(h_fov, v_fov) >= float(args.fisheye_fov_threshold_deg)
-        or (diag_fov >= float(args.fisheye_diag_threshold_deg) and v_fov >= float(args.fisheye_vfov_min_deg))
+        max(h_fov, v_fov) >= FISHEYE_FOV_THRESHOLD_DEG
+        or (diag_fov >= FISHEYE_DIAG_THRESHOLD_DEG and v_fov >= FISHEYE_VFOV_MIN_DEG)
     )
     if fishlike_aspect and fishlike_fov:
         return "fisheye"
@@ -321,6 +391,13 @@ def _camera_name_from_json(entry: dict[str, Any] | None) -> str | None:
     return str(value).strip().lower() if value is not None and str(value).strip() else None
 
 
+def _camera_name_from_aspect(image_h: int, image_w: int) -> str | None:
+    aspect = float(image_w) / float(max(image_h, 1))
+    if PANORAMA_ASPECT_MIN <= aspect <= PANORAMA_ASPECT_MAX:
+        return "panorama"
+    return None
+
+
 @torch.no_grad()
 def _predict_unik3d_rays(
     model: UnisharpFeatureModel,
@@ -369,6 +446,72 @@ def _build_rotate_poses(num_views: int, radius_m: float, device: torch.device) -
         )
         poses.append(build_extrinsics_w2c(src_r_c2w, eye, "c2w"))
     return poses
+
+
+def _predicted_depth_samples_m(model_output: dict[str, Any]) -> torch.Tensor | None:
+    depth = model_output.get("unik3d_distance")
+    if not torch.is_tensor(depth):
+        layers = model_output.get("distance_layers")
+        if torch.is_tensor(layers) and layers.ndim >= 4 and int(layers.shape[1]) >= 1:
+            depth = layers[:, 0:1]
+    if torch.is_tensor(depth) and depth.numel() > 0:
+        values = depth.detach().reshape(-1).to(torch.float32)
+        valid = values[torch.isfinite(values) & (values > 1e-3) & (values < 1e4)]
+        if int(valid.numel()) > 0:
+            return valid
+    gaussians = model_output.get("gaussians")
+    if gaussians is not None and hasattr(gaussians, "mean_vectors"):
+        z = gaussians.mean_vectors.detach().reshape(-1, 3)[..., 2].reshape(-1).to(torch.float32)
+        valid = z[torch.isfinite(z) & (z > 1e-3) & (z < 1e4)]
+        if int(valid.numel()) > 0:
+            return valid
+    return None
+
+
+def _scene_depth_for_motion_m(model_output: dict[str, Any]) -> tuple[float | None, float | None, float | None]:
+    """Return (effective_depth, median_depth, foreground_depth_p25) in meters."""
+    valid = _predicted_depth_samples_m(model_output)
+    if valid is None or int(valid.numel()) == 0:
+        return None, None, None
+    median_depth_m = float(torch.median(valid).item())
+    q = float(VIEW_MOTION_FOREGROUND_DEPTH_QUANTILE)
+    foreground_depth_m = float(torch.quantile(valid, q).item())
+    if float(median_depth_m) >= float(VIEW_MOTION_FAR_SCENE_MEDIAN_M):
+        effective_depth_m = float(median_depth_m)
+    else:
+        effective_depth_m = float(min(median_depth_m, foreground_depth_m))
+    return effective_depth_m, median_depth_m, foreground_depth_m
+
+
+def _adaptive_view_motion_distances(
+    model_output: dict[str, Any],
+    *,
+    default_forward_m: float,
+    default_radius_m: float,
+) -> tuple[float, float, float | None, float, float | None, float | None]:
+    effective_depth_m, median_depth_m, foreground_depth_m = _scene_depth_for_motion_m(model_output)
+    near_threshold_m = float(VIEW_MOTION_NEAR_SCENE_DEPTH_M)
+    if (
+        effective_depth_m is None
+        or not math.isfinite(effective_depth_m)
+        or float(effective_depth_m) >= near_threshold_m
+    ):
+        return (
+            float(default_forward_m),
+            float(default_radius_m),
+            effective_depth_m,
+            1.0,
+            median_depth_m,
+            foreground_depth_m,
+        )
+    scale = max(float(VIEW_MOTION_MIN_SCALE), float(effective_depth_m) / near_threshold_m)
+    forward_m = float(default_forward_m) * scale
+    radius_m = float(default_radius_m) * scale
+    forward_cap_m = float(effective_depth_m) * float(VIEW_MOTION_FORWARD_DEPTH_FRAC)
+    radius_cap_m = float(effective_depth_m) * float(VIEW_MOTION_ROTATE_DEPTH_FRAC)
+    forward_m = min(forward_m, forward_cap_m)
+    radius_m = min(radius_m, radius_cap_m)
+    return forward_m, radius_m, effective_depth_m, scale, median_depth_m, foreground_depth_m
 
 
 def _render_pinhole_frame(
@@ -515,85 +658,114 @@ def _process_one(
     step: int,
     args: argparse.Namespace,
 ) -> None:
-    rgb_u8 = _load_rgb_u8(image_path, max_long_edge=int(args.max_long_edge))
-    _, h, w = rgb_u8.shape
-    if h < 4 or w < 4:
-        raise ValueError(f"Invalid image size for {image_path}: {tuple(rgb_u8.shape)}")
-
-    device = next(model.parameters()).device
-    image_u8 = rgb_u8.unsqueeze(0).to(device=device)
-    image = image_u8.to(torch.float32) / 255.0
-
+    native_h, native_w = _image_hw_from_path(image_path)
     camera_json_entry = _camera_json_for_image(getattr(args, "_camera_json_data", None), image_path)
-    json_camera_name = _camera_name_from_json(camera_json_entry)
-    json_intrinsics = _values_from_camera_json(camera_json_entry, "intrinsics", "camera_intrinsics", "K")
-    json_camera_params = _values_from_camera_json(camera_json_entry, "camera_params", "fisheye624_params", "params")
-    explicit_intrinsics = _pinhole_intrinsics_from_values(json_intrinsics or args.camera_intrinsics, device=device)
-    explicit_camera_params = _fisheye624_params_from_values(json_camera_params or args.camera_params, device=device)
-    if explicit_intrinsics is not None and explicit_camera_params is not None:
-        raise ValueError("Use only one of --camera-intrinsics or --camera-params.")
+    load_max_long_edge = _initial_max_long_edge(
+        image_path=image_path,
+        args=args,
+        camera_json_entry=camera_json_entry,
+    )
 
-    rays: torch.Tensor | None
-    render_intrinsics: torch.Tensor | None = None
-    render_camera_params: torch.Tensor | None = None
-    if explicit_intrinsics is not None:
-        camera_kind: CameraKind = "panorama" if json_camera_name in {"panorama", "erp", "spherical"} else "perspective"
-        render_intrinsics = explicit_intrinsics
-        if camera_kind == "panorama":
-            out = _run_model_panorama(model, image, image_u8, distance_init_cap_m=float(args.distance_init_cap_m))
-        else:
-            out = _run_model_pinhole(
-                model,
-                image,
-                image_u8,
-                intrinsics=explicit_intrinsics,
-                distance_init_cap_m=float(args.distance_init_cap_m),
-            )
-        rays = out.get("geometry_rays", out.get("unik3d_gt_rays", out.get("unik3d_rays", None)))
-        stats = _ray_fov_stats(rays) if torch.is_tensor(rays) else _empty_ray_stats()
-    elif explicit_camera_params is not None:
-        camera_kind = "fisheye"
-        render_camera_params = explicit_camera_params
-        out = _run_model_fisheye(
-            model,
-            image,
-            image_u8,
-            camera_params=explicit_camera_params,
-            distance_init_cap_m=float(args.distance_init_cap_m),
-        )
-        rays = out.get("geometry_rays", out.get("unik3d_gt_rays", out.get("unik3d_rays", None)))
-        stats = _ray_fov_stats(rays) if torch.is_tensor(rays) else _empty_ray_stats()
-    else:
-        rays = _predict_unik3d_rays(model, image_u8, image_h=h, image_w=w)
-        stats = _ray_fov_stats(rays)
-        if json_camera_name in {"panorama", "erp", "spherical"}:
-            camera_kind = "panorama"
-        elif json_camera_name in {"fisheye", "fisheye624", "opencv_fisheye"}:
+    for reload_attempt in range(2):
+        rgb_u8 = _load_rgb_u8(image_path, max_long_edge=load_max_long_edge)
+        _, h, w = rgb_u8.shape
+        if h < 4 or w < 4:
+            raise ValueError(f"Invalid image size for {image_path}: {tuple(rgb_u8.shape)}")
+
+        device = next(model.parameters()).device
+        image_u8 = rgb_u8.unsqueeze(0).to(device=device)
+        image = image_u8.to(torch.float32) / 255.0
+        json_camera_name = _camera_name_from_json(camera_json_entry)
+        aspect_camera_name = _camera_name_from_aspect(image_h=h, image_w=w)
+        forced_camera_name = str(args.camera).strip().lower()
+        forced_camera_name = None if forced_camera_name == "auto" else {"pinhole": "perspective", "erp": "panorama"}.get(forced_camera_name, forced_camera_name)
+        json_intrinsics = _values_from_camera_json(camera_json_entry, "intrinsics", "camera_intrinsics", "K")
+        json_camera_params = _values_from_camera_json(camera_json_entry, "camera_params", "fisheye624_params", "params")
+        explicit_intrinsics = _pinhole_intrinsics_from_values(json_intrinsics or args.camera_intrinsics, device=device)
+        explicit_camera_params = _fisheye624_params_from_values(json_camera_params or args.camera_params, device=device)
+        if explicit_intrinsics is not None and explicit_camera_params is not None:
+            raise ValueError("Use only one of --camera-intrinsics or --camera-params.")
+
+        rays: torch.Tensor | None
+        render_intrinsics: torch.Tensor | None = None
+        render_camera_params: torch.Tensor | None = None
+        if explicit_intrinsics is not None:
+            camera_kind: CameraKind = "panorama" if json_camera_name in {"panorama", "erp", "spherical"} else "perspective"
+            render_intrinsics = explicit_intrinsics
+            if camera_kind == "panorama":
+                out = _run_model_panorama(model, image, image_u8, distance_init_cap_m=0.0)
+            else:
+                out = _run_model_pinhole(
+                    model,
+                    image,
+                    image_u8,
+                    intrinsics=explicit_intrinsics,
+                    distance_init_cap_m=0.0,
+                )
+            rays = out.get("geometry_rays", out.get("unik3d_gt_rays", out.get("unik3d_rays", None)))
+            stats = _ray_fov_stats(rays) if torch.is_tensor(rays) else _empty_ray_stats()
+        elif explicit_camera_params is not None:
             camera_kind = "fisheye"
-        elif json_camera_name in {"perspective", "pinhole"}:
-            camera_kind = "perspective"
-        else:
-            camera_kind = _classify_camera(stats, args)
-        if camera_kind == "panorama":
-            out = _run_model_panorama(model, image, image_u8, distance_init_cap_m=float(args.distance_init_cap_m))
-        elif camera_kind == "fisheye":
-            render_camera_params = fit_fisheye624_params_from_rays(rays).detach().to(device=device, dtype=torch.float32)
+            render_camera_params = explicit_camera_params
             out = _run_model_fisheye(
                 model,
                 image,
                 image_u8,
-                camera_params=render_camera_params,
-                distance_init_cap_m=float(args.distance_init_cap_m),
+                camera_params=explicit_camera_params,
+                distance_init_cap_m=0.0,
             )
+            rays = out.get("geometry_rays", out.get("unik3d_gt_rays", out.get("unik3d_rays", None)))
+            stats = _ray_fov_stats(rays) if torch.is_tensor(rays) else _empty_ray_stats()
+        elif forced_camera_name == "panorama" or (
+            forced_camera_name is None and (json_camera_name in {"panorama", "erp", "spherical"} or aspect_camera_name == "panorama")
+        ):
+            camera_kind = "panorama"
+            out = _run_model_panorama(model, image, image_u8, distance_init_cap_m=0.0)
+            rays = out.get("geometry_rays", out.get("unik3d_gt_rays", out.get("unik3d_rays", None)))
+            stats = _ray_fov_stats(rays) if torch.is_tensor(rays) else _empty_ray_stats()
         else:
-            render_intrinsics = fit_pinhole_intrinsics_from_rays(rays).detach().to(device=device, dtype=torch.float32)
-            out = _run_model_pinhole(
-                model,
-                image,
-                image_u8,
-                intrinsics=render_intrinsics,
-                distance_init_cap_m=float(args.distance_init_cap_m),
-            )
+            rays = _predict_unik3d_rays(model, image_u8, image_h=h, image_w=w)
+            stats = _ray_fov_stats(rays)
+            if forced_camera_name == "fisheye":
+                camera_kind = "fisheye"
+            elif forced_camera_name == "perspective":
+                camera_kind = "perspective"
+            elif json_camera_name in {"fisheye", "fisheye624", "opencv_fisheye"}:
+                camera_kind = "fisheye"
+            elif json_camera_name in {"perspective", "pinhole"}:
+                camera_kind = "perspective"
+            else:
+                camera_kind = _classify_camera(stats, args)
+            if camera_kind == "panorama":
+                out = _run_model_panorama(model, image, image_u8, distance_init_cap_m=0.0)
+            elif camera_kind == "fisheye":
+                render_camera_params = fit_fisheye624_params_from_rays(rays).detach().to(device=device, dtype=torch.float32)
+                out = _run_model_fisheye(
+                    model,
+                    image,
+                    image_u8,
+                    camera_params=render_camera_params,
+                    distance_init_cap_m=0.0,
+                )
+            else:
+                render_intrinsics = fit_pinhole_intrinsics_from_rays(rays).detach().to(device=device, dtype=torch.float32)
+                out = _run_model_pinhole(
+                    model,
+                    image,
+                    image_u8,
+                    intrinsics=render_intrinsics,
+                    distance_init_cap_m=0.0,
+                )
+
+        needs_native_panorama = (
+            camera_kind == "panorama"
+            and (h < native_h or w < native_w)
+            and load_max_long_edge != _panorama_max_long_edge()
+        )
+        if needs_native_panorama and reload_attempt == 0:
+            load_max_long_edge = _panorama_max_long_edge()
+            continue
+        break
 
     LOGGER.info(
         "%s -> %s | hfov=%.1f vfov=%.1f diag=%.1f aspect=%.3f",
@@ -607,27 +779,49 @@ def _process_one(
 
     src_w2c = torch.eye(4, dtype=torch.float32, device=device)
     gaussians_world = transform_gaussians_to_world(out["gaussians"], src_w2c)
+    model_output = out if isinstance(out, dict) else {"gaussians": out}
+    (
+        forward_distance_m,
+        rotate_radius_m,
+        scene_depth_m,
+        motion_scale,
+        median_depth_m,
+        foreground_depth_m,
+    ) = _adaptive_view_motion_distances(
+        model_output,
+        default_forward_m=FORWARD_DISTANCE_M,
+        default_radius_m=ROTATE_RADIUS_M,
+    )
+    if float(motion_scale) < 0.999:
+        LOGGER.info(
+            "Near-scene view motion | depth_eff=%.3fm median=%.3fm p25=%.3fm scale=%.3f forward=%.3fm orbit=%.3fm",
+            float(scene_depth_m) if scene_depth_m is not None else float("nan"),
+            float(median_depth_m) if median_depth_m is not None else float("nan"),
+            float(foreground_depth_m) if foreground_depth_m is not None else float("nan"),
+            float(motion_scale),
+            float(forward_distance_m),
+            float(rotate_radius_m),
+        )
     forward_poses = _build_forward_poses(
-        num_views=int(args.forward_views),
-        distance_m=float(args.forward_distance_m),
+        num_views=FORWARD_VIEWS,
+        distance_m=forward_distance_m,
         device=device,
     )
     rotate_poses = _build_rotate_poses(
-        num_views=int(args.rotate_views),
-        radius_m=float(args.rotate_radius_m),
+        num_views=ROTATE_VIEWS,
+        radius_m=rotate_radius_m,
         device=device,
     )
 
     sample_dir = out_root / _slug_from_path(image_path)
     sample_dir.mkdir(parents=True, exist_ok=True)
     output_crop_border_fraction = 0.0 if camera_kind == "panorama" else 0.05
-    Image.fromarray(_crop_border_u8(_to_u8_hwc(rgb_u8), output_crop_border_fraction)).save(sample_dir / "input.png")
 
     forward_frames: list[np.ndarray] = []
     rotate_frames: list[np.ndarray] = []
 
     if camera_kind == "panorama":
-        face_w = int(args.face_w) if int(args.face_w) > 0 else max(16, int(min(h, w // 4)))
+        face_w = max(16, int(min(h, w // 4)))
         forward_dir = sample_dir / "forward_erp"
         rotate_dir = sample_dir / "rotate_erp"
         rotate_faces_dir = sample_dir / "rotate_cubemap_faces"
@@ -691,8 +885,8 @@ def _process_one(
         forward_frames = [_crop_border_u8(frame, output_crop_border_fraction) for frame in forward_frames]
         rotate_frames = [_crop_border_u8(frame, output_crop_border_fraction) for frame in rotate_frames]
 
-    _save_gif(forward_frames, sample_dir / "forward_0p2m.gif", duration_ms=int(args.gif_duration_ms))
-    _save_gif(rotate_frames, sample_dir / "rotate_0p1m.gif", duration_ms=int(args.gif_duration_ms))
+    _save_gif(forward_frames, sample_dir / "forward.gif", duration_ms=GIF_DURATION_MS)
+    _save_gif(rotate_frames, sample_dir / "rotate.gif", duration_ms=GIF_DURATION_MS)
     _save_ply_if_requested(gaussians_world, sample_dir / "gaussians.ply", f_px=f_px, image_h=h, image_w=w, enabled=bool(args.save_ply))
 
     metadata = {
@@ -703,10 +897,17 @@ def _process_one(
         "ray_stats": stats,
         "camera_json": str(args.camera_json) if args.camera_json is not None else None,
         "camera_json_entry": camera_json_entry,
+        "aspect_camera_name": aspect_camera_name,
         "explicit_camera_intrinsics": args.camera_intrinsics,
         "explicit_camera_params": args.camera_params,
-        "forward_distance_m": float(args.forward_distance_m),
-        "rotate_radius_m": float(args.rotate_radius_m),
+        "forward_distance_m": float(forward_distance_m),
+        "rotate_radius_m": float(rotate_radius_m),
+        "forward_distance_m_default": float(FORWARD_DISTANCE_M),
+        "rotate_radius_m_default": float(ROTATE_RADIUS_M),
+        "scene_depth_for_motion_m": scene_depth_m,
+        "median_predicted_depth_m": median_depth_m,
+        "foreground_depth_p25_m": foreground_depth_m,
+        "view_motion_scale": float(motion_scale),
         "rotate_path": "clockwise_camera_xy_orbit_fixed_source_orientation",
         "panorama_renderer": "unisharp.cli.unified_trainer.UnifiedTrainer._render_cubemap/_cube_to_erp",
         "low_pass_filter_eps": float(args.low_pass_filter_eps),
@@ -727,14 +928,6 @@ def _build_argparser() -> argparse.ArgumentParser:
     p.add_argument("--out-dir", type=Path, default=REPO_ROOT / "outputs" / "inference")
     p.add_argument("--device", type=str, default="cuda:0" if torch.cuda.is_available() else "cpu")
     p.add_argument("--max-images", type=int, default=0)
-    p.add_argument("--max-long-edge", type=int, default=768)
-    p.add_argument("--forward-views", type=int, default=10)
-    p.add_argument("--forward-distance-m", type=float, default=0.2)
-    p.add_argument("--rotate-views", type=int, default=10)
-    p.add_argument("--rotate-radius-m", type=float, default=0.1)
-    p.add_argument("--gif-duration-ms", type=int, default=300)
-    p.add_argument("--face-w", type=int, default=0, help="Panorama cubemap face width. 0 uses min(H, W/4).")
-    p.add_argument("--distance-init-cap-m", type=float, default=0.0)
     p.add_argument("--save-ply", action="store_true")
     p.add_argument(
         "--camera-json",
@@ -763,14 +956,6 @@ def _build_argparser() -> argparse.ArgumentParser:
         choices=["auto", "perspective", "pinhole", "fisheye", "panorama", "erp"],
         help="Override automatic ray-range camera classification.",
     )
-    p.add_argument("--fisheye-fov-threshold-deg", type=float, default=95.0)
-    p.add_argument("--fisheye-diag-threshold-deg", type=float, default=130.0)
-    p.add_argument("--fisheye-vfov-min-deg", type=float, default=70.0)
-    p.add_argument("--fisheye-max-aspect", type=float, default=1.65)
-    p.add_argument("--panorama-hfov-threshold-deg", type=float, default=260.0)
-    p.add_argument("--panorama-vfov-threshold-deg", type=float, default=120.0)
-    p.add_argument("--panorama-aspect-min", type=float, default=1.75)
-    p.add_argument("--panorama-aspect-max", type=float, default=2.25)
     p.add_argument("--low-pass-filter-eps", type=float, default=0.0)
     return p
 
