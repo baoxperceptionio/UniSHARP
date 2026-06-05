@@ -20,6 +20,7 @@ Universal Sharp Monocular View Synthesis
   <a href="https://insta360-research-team.github.io/Unisharp-website/"><img src="https://img.shields.io/badge/Project_Page-Website-green" alt="Project Page"></a>
   <a href="https://huggingface.co/spaces/Insta360-Research/UniSHARP"><img src="https://img.shields.io/badge/HuggingFace-Demo-yellow" alt="Demo"></a>
   <a href="https://huggingface.co/datasets/Insta360-Research/OmniRooms"><img src="https://img.shields.io/badge/HuggingFace-OmniRooms-orange" alt="Dataset"></a>
+  <a href="https://github.com/Insta360-Research-Team/UniSHARP"><img src="https://img.shields.io/badge/GitHub-Code-blue?logo=github&logoColor=white" alt="GitHub"></a>
 </p>
 
 UniSHARP extends SHARP-style photorealistic monocular view synthesis to universal camera systems. Given a single image from a perspective, wide-FoV, fisheye, or panoramic camera, UniSHARP predicts a 3D Gaussian representation and renders high-quality novel views.
