@@ -26,12 +26,8 @@ Universal Sharp Monocular View Synthesis
 UniSHARP extends SHARP-style photorealistic monocular view synthesis to universal camera systems. Given a single image from a perspective, wide-FoV, fisheye, or panoramic camera, UniSHARP predicts a 3D Gaussian representation and renders high-quality novel views.
 
 <p align="center">
-  <table>
-    <tr>
-      <td align="center"><img src="assets/teaser.gif" alt="UniSHARP teaser" height="360"></td>
-      <td align="center"><img src="assets/teaser2.gif" alt="UniSHARP teaser 2" height="360"></td>
-    </tr>
-  </table>
+  <img src="assets/teaser.gif" width="49%" alt="UniSHARP teaser">
+  <img src="assets/teaser2.gif" width="49%" alt="UniSHARP teaser 2">
 </p>
 
 <p align="center">
