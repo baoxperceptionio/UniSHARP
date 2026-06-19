@@ -1,0 +1,49 @@
+# VCS and editor files
+.git
+.gitignore
+.vscode
+.idea
+.agents
+.codex
+
+# Python
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.venv
+venv
+env
+build
+dist
+*.egg-info
+
+# Node
+node_modules
+npm-debug.log*
+
+# Data, model, and run outputs
+outputs
+runs
+wandb
+checkpoints
+users/checkpoints
+users/outputs
+users/**/__pycache__
+UniK3D/checkpoints
+UniK3D/.cache
+UniK3D/**/__pycache__
+UniK3D/.git
+3dgeer/.git
+dataset_manifests
+validation_manifests
+*.ckpt
+*.pth
+*.pt
+
+# Local secrets
+.env
+.env.*
+*.pem
+*.key
